@@ -31,7 +31,7 @@ public class MultipleHUD extends JavaPlugin {
     @Override
     protected void setup() {
         super.setup();
-        this.getEntityStoreRegistry().registerSystem(new CustomTickingSystem());
+        //this.getEntityStoreRegistry().registerSystem(new CustomTickingSystem());
     }
 
     public void setCustomHud(Player player, PlayerRef playerRef, String hudIdentifier, CustomUIHud customHud) {
