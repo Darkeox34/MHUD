@@ -11,7 +11,7 @@ import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.logging.Level;
 
-class MultipleCustomUIHud extends CustomUIHud {
+public class MultipleCustomUIHud extends CustomUIHud {
 
     private static Method BUILD_METHOD;
 
