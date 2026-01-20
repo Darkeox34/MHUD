@@ -1,9 +1,11 @@
 package com.buuz135.mhud;
 
 import com.hypixel.hytale.protocol.packets.interface_.CustomUICommand;
+import com.hypixel.hytale.protocol.packets.interface_.CustomUICommandType;
 import com.hypixel.hytale.server.core.entity.entities.player.hud.CustomUIHud;
 import com.hypixel.hytale.server.core.ui.builder.UICommandBuilder;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
+import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import org.checkerframework.checker.nullness.compatqual.NonNullDecl;
 
 import javax.annotation.Nonnull;
@@ -11,7 +13,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.logging.Level;
@@ -41,22 +42,78 @@ public class MultipleCustomUIHud extends CustomUIHud {
         }
     }
 
-    static void buildHud (@Nonnull UICommandBuilder uiCommandBuilder, String id, @Nonnull CustomUIHud hud) {
+    private static class PrefixedUICommandBuilder extends UICommandBuilder {
+        private final List<CustomUICommand> wrappedCommands = new ObjectArrayList();
+        private final String prefix;
+
+        public PrefixedUICommandBuilder(@NonNullDecl String id) {
+            this.prefix = "#MultipleHUD #" + id;;
+        }
+
+        public String getPrefix() {
+            return this.prefix;
+        }
+
+        private void prefixCommands() throws IllegalAccessException {
+            final List<CustomUICommand> commands =
+                    (List<CustomUICommand>) COMMANDS_FIELD.get(this);
+
+            for (int i = 0, n = commands.size(); i < n; i++) {
+                CustomUICommand command = commands.get(i);
+                if (command.selector == null) {
+                    command.selector = this.prefix;
+                } else {
+                    command.selector = this.prefix + ' ' + command.selector;
+                }
+                wrappedCommands.add(command);
+            }
+            commands.clear();
+        }
+
+        // this will be called by update method of CustomUIHud
+        // here as a workaround of buggy huds. shouldn't be necessary normally.
+        @Override
+        @Nonnull
+        public CustomUICommand[] getCommands() {
+            try {
+                this.prefixCommands();
+            } catch (IllegalAccessException e) {
+                throw new RuntimeException(e);
+            }
+            CustomUICommand[] commands = wrappedCommands.toArray(new CustomUICommand[0]);
+            // we need to clear the commands if the hud mod author decided to call update himself.
+            wrappedCommands.clear();
+            return commands;
+        }
+
+        void appendCommandsTo (UICommandBuilder builder) throws IllegalAccessException {
+            this.prefixCommands();
+            final List<CustomUICommand> commands =
+                    (List<CustomUICommand>) COMMANDS_FIELD.get(builder);
+            commands.addAll(this.wrappedCommands);
+        }
+
+        void addCustomCommand (CustomUICommandType type, String selector, String document) {
+            this.wrappedCommands.add(new CustomUICommand(type, selector, null, document));
+        }
+    }
+
+    static void buildHud (
+            @Nonnull UICommandBuilder uiCommandBuilder,
+            @NonNullDecl String normalizedId,
+            @Nonnull CustomUIHud hud,
+            boolean hudExists
+    ) {
         try {
             if (BUILD_METHOD == null || COMMANDS_FIELD == null) return;
-
-            UICommandBuilder singleHudBuilder = new UICommandBuilder();
+            PrefixedUICommandBuilder singleHudBuilder = new PrefixedUICommandBuilder(normalizedId);
+            if (hudExists) {
+                singleHudBuilder.addCustomCommand(CustomUICommandType.Clear, singleHudBuilder.getPrefix(), null);
+            } else {
+                singleHudBuilder.addCustomCommand(CustomUICommandType.AppendInline, "#MultipleHUD","Group #" + normalizedId + " {}");
+            }
             BUILD_METHOD.invoke(hud, singleHudBuilder);
-
-            final List<CustomUICommand> commands = (List<CustomUICommand>) COMMANDS_FIELD.get(uiCommandBuilder);
-            Arrays.stream(singleHudBuilder.getCommands()).forEach((CustomUICommand command) -> {
-                if (command.selector == null) {
-                    command.selector = '#' + id;
-                } else {
-                    command.selector = '#' + id + ' ' + command.selector;
-                }
-                commands.add(command);
-            });
+            singleHudBuilder.appendCommandsTo(uiCommandBuilder);
         } catch (IllegalAccessException | InvocationTargetException e) {
             throw new RuntimeException(e);
         }
@@ -84,29 +141,25 @@ public class MultipleCustomUIHud extends CustomUIHud {
         for (String identifier : customHuds.keySet()) {
             String normalizedId = normalizedIds.get(identifier);
             CustomUIHud hud = customHuds.get(identifier);
-            commandBuilder.appendInline("#MultipleHUD", "Group #" + identifier + " {}");
-            buildHud(commandBuilder, normalizedId, hud);
+            buildHud(commandBuilder, normalizedId, hud, false);
         }
         this.update(true, commandBuilder);
     }
 
-    public void add (String identifier, CustomUIHud hud) {
+    public void add (@NonNullDecl String identifier, @NonNullDecl CustomUIHud hud) {
         UICommandBuilder commandBuilder = new UICommandBuilder();
-        String normalizedId = normalizedIds.get(identifier);
-        CustomUIHud existingHud = customHuds.get(identifier);
-        boolean shownBefore = existingHud != null && normalizedId != null;
-        if (shownBefore || existingHud != hud) {
-            commandBuilder.clear("#MultipleHUD #" + normalizedId);
-        } else {
-            normalizedId = identifier.replaceAll("[^a-zA-Z0-9]", "");
-            normalizedIds.put(identifier, normalizedId);
-            commandBuilder.appendInline("#MultipleHUD", "Group #" + normalizedId + " {}");
+
+        String normalizedId = normalizedIds.computeIfAbsent(identifier, i -> i.replaceAll("[^a-zA-Z0-9]", ""));
+        CustomUIHud existingHud = customHuds.put(identifier, hud);
+        if (existingHud != hud) {
+            customHuds.put(identifier, hud);
         }
-        buildHud(commandBuilder, normalizedId, hud);
+
+        buildHud(commandBuilder, normalizedId, hud, existingHud != null);
         update(false, commandBuilder);
     }
 
-    public void remove (String identifier) {
+    public void remove (@NonNullDecl String identifier) {
         String normalizedId = normalizedIds.get(identifier);
         boolean shownBefore = normalizedId != null;
         if (!shownBefore) return;
