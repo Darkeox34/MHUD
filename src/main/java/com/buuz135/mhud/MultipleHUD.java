@@ -19,7 +19,6 @@ public class MultipleHUD extends JavaPlugin {
     public MultipleHUD(@Nonnull JavaPluginInit init) {
         super(init);
         instance = this;
-        getLogger().atInfo().log(instance.toString());
     }
 
     @Override
